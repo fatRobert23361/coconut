@@ -1,8 +1,8 @@
 # need 4 gpus
 
-project: coconut
-save_path: YOUR_PATH_TO_SAVE_THE_MODEL
-name: gsm-cot
+project: coconut-int
+save_path: /home/haoyang/haoyang/coconut/models
+name: nihaoyang2002-kth-royal-institute-of-technology
 
 only_eval: False
 

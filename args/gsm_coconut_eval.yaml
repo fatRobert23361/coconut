@@ -19,7 +19,7 @@ pad_latent_to_max: True
 save_only_improve: False
 uniform_prob: 0.0
 model_id: openai-community/gpt2
-load_model_path: YOUR_PATH_TO_COCONUT_CHECKPOINT
+load_model_path: /home/haoyang/haoyang/coconut/models/gsm-coconut/checkpoint_12
 seed: 0
 resume: 15
 bf16: False
