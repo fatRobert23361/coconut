@@ -7,7 +7,7 @@ from torch.nn import CrossEntropyLoss
 from collections import namedtuple
 from transformers.models.gpt2 import GPT2LMHeadModel
 
-Outputs = namedtuple("Outputs", ["loss", "inputs_embeds", "logits"])
+Outputs = namedtuple("Outputs", ["loss", "inputs_embeds", "logits", "latent_states"])
 MAX_N_LATENT = 8
 
 
@@ -39,7 +39,8 @@ class Coconut(nn.Module):
     def forward(self, input_ids, attention_mask, labels, position_ids, **kwargs):
 
         logits = []
-
+        last_hidden_states = []
+        
         latent_indices = (
             input_ids == self.latent_token_id
         ).nonzero()  # (num_latent_tokens_in_the_batch, 2)
@@ -104,7 +105,6 @@ class Coconut(nn.Module):
                 # when we use kv_cache for the first k tokens
                 # in `outputs.hidden_states`, [0, k) will be skipped
                 # so we need to keep this offset to correctly use the last hidden states
-
             logits.append(outputs.logits)
 
             next_compute_range = (
@@ -120,7 +120,8 @@ class Coconut(nn.Module):
                 -1
             ]  # Get the last layer hidden states
             kv_cache = outputs.past_key_values
-
+            # save the last hidden states for the current pass
+            last_hidden_states.append(hidden_states.detach().cpu())
             # feedback the continuous thoughts to the input_embeds
 
             # first decide the positions to feedback
@@ -190,7 +191,7 @@ class Coconut(nn.Module):
             shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
         )
 
-        return Outputs(loss=loss, inputs_embeds=inputs_embeds, logits=logits)
+        return Outputs(loss=loss, inputs_embeds=inputs_embeds, logits=logits, latent_states=last_hidden_states)
 
     def train(self):
         self.base_causallm.train()
