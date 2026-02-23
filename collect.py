@@ -7,6 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from coconut import Coconut
 from dataset import get_dataset, get_cot_latent_dataset, MyCollator
 from utils import Config, set_seed
+from collections import defaultdict
 
 def extract_and_save():
     # load config
@@ -87,5 +88,36 @@ def extract_and_save():
             
             torch.save(data_pair, f"{output_dir}/s{stage}_idx{idx}.pt")
 
+def merge_by_stage(source_dir, target_dir):
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
+
+    file_groups = defaultdict(list)
+    files = [f for f in os.listdir(source_dir) if f.endswith('.pt')]
+    
+    for f in files:
+        stage_key = f.split('_')[0] 
+        file_groups[stage_key].append(f)
+
+    print(f"detected {len(file_groups)} Stage: {list(file_groups.keys())}")
+
+    for stage, f_list in file_groups.items():
+        all_samples = []
+        print(f"Merging {stage}，total number {len(f_list)} ")
+        
+        for f_name in tqdm(f_list):
+            file_path = os.path.join(source_dir, f_name)
+            try:
+                data = torch.load(file_path, map_location='cpu')
+                all_samples.append(data)
+            except Exception as e:
+                print(f"skipped {f_name}: {e}")
+
+        save_path = os.path.join(target_dir, f"{stage}_combined.pt")
+        torch.save(all_samples, save_path)
+        print(f" {save_path} has {len(all_samples)} rows of data)")
+
 if __name__ == "__main__":
-    extract_and_save()
+    SOURCE = "extracted_dataset"
+    TARGET = "data/coconut_prosqa_gpt2"
+    merge_by_stage(SOURCE, TARGET)
