@@ -73,6 +73,9 @@ def extract_and_save():
                 
                 # we use c_thought=1 here
                 current_latent = outputs.latent_states[stage - 1] 
+            if current_latent is None:
+                print(f"skipped idx {idx} at stage {stage} due to empty latent")
+                continue
 
             # save the extracted latent vector and the corresponding target text, question, and metadata
             data_pair = {
@@ -121,3 +124,4 @@ if __name__ == "__main__":
     SOURCE = "extracted_dataset"
     TARGET = "data/coconut_prosqa_gpt2"
     merge_by_stage(SOURCE, TARGET)
+    # extract_and_save()

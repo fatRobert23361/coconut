@@ -121,7 +121,33 @@ class Coconut(nn.Module):
             ]  # Get the last layer hidden states
             kv_cache = outputs.past_key_values
             # save the last hidden states for the current pass
-            last_hidden_states.append(hidden_states.detach().cpu())
+            # --- 修改开始 ---
+            # 不要直接存下整个 hidden_states，它太大了。
+            # 我们只需要在该 pass 中，对应被反馈位置的前一个向量。
+            # 对于 batch_size=1 且 stage 提取的情况：
+            # 在 pass_idx 轮，我们反馈的是 token_idx - 1 位置的向量。
+            
+            current_pass_latents = []
+            for instance_idx, mask_list in enumerate(latent_lists):
+                if len(mask_list) > pass_idx:
+                    token_idx = mask_list[pass_idx]
+                    # 提取具体的向量：(batch_idx, seq_idx_in_current_pass, hidden_size)
+                    # 注意减去 offset
+                    latent_vec = hidden_states[
+                        instance_idx:instance_idx+1, 
+                        token_idx - 1 - hidden_states_offset : token_idx - hidden_states_offset, 
+                        :
+                    ]
+                    current_pass_latents.append(latent_vec.detach().cpu())
+            
+            # 如果该 batch 中有人产生了 latent，保存这些具体的向量
+            if current_pass_latents:
+                # 拼接成 (num_samples_with_latent, 1, 768)
+                last_hidden_states.append(torch.cat(current_pass_latents, dim=0))
+            else:
+                last_hidden_states.append(None) # 占位
+            # --- 修改结束 ---
+            # last_hidden_states.append(hidden_states.detach().cpu())
             # feedback the continuous thoughts to the input_embeds
 
             # first decide the positions to feedback
