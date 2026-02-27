@@ -12,6 +12,7 @@ import torch.distributed as dist
 from datasets import Dataset
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import pad_without_fast_tokenizer_warning
+from torch.utils.data import Dataset as TorchDataset
 
 
 def get_dataset(path, tokenizer, max_size=1000000000):
@@ -323,3 +324,69 @@ def get_cot_latent_dataset(
         dataset = processed_dataset
 
     return dataset
+
+class CoconutTranslatorDataset(TorchDataset):
+    def __init__(self, data_path, tokenizer, max_latent=3, max_text_len=64):
+        """
+        data_path: 合并后的 .pt 文件路径 (如 'merged_dataset/s1_combined.pt')
+        tokenizer: 翻译器使用的 tokenizer
+        max_latent: 最大的连续想法数量 (1, 2, 或 3)
+        """
+        print(f"Loading data from {data_path}...")
+        # 直接加载合并后的列表
+        self.samples = torch.load(data_path) 
+        # raw_data = torch.load(data_path) 
+        # print(f"DEBUG: raw_data type: {type(raw_data)}, first element type: {type(raw_data[0])}")
+        # # --- 核心修复：打平嵌套列表 ---
+        # self.samples = []
+        # for chunk in raw_data:
+        #     if isinstance(chunk, list):
+        #         self.samples.extend(chunk) # 如果是列表，合并进去
+        #     else:
+        #         self.samples.append(chunk) # 如果已经是字典，直接添加
+        # # ---------------------------
+        self.tokenizer = tokenizer
+        self.max_latent = max_latent
+        self.max_text_len = max_text_len
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        # 获取合并数据中的单个字典
+        item = self.samples[idx]
+        
+        # 1. 处理隐藏状态向量 (latent_vec)
+        # 提取到的 latent_vec 形状可能是 (k, 768), k 为 1-3
+        latent_vec = item["latent_vec"] 
+        if latent_vec.dim() == 1: # 兼容处理 (768,) 的情况
+            latent_vec = latent_vec.unsqueeze(0)
+            
+        k = latent_vec.shape[0]
+        
+        # 将向量填充到固定的 max_latent 长度 (如 3)
+        # 形状: (3, 768)
+        padded_latent = torch.zeros((self.max_latent, latent_vec.shape[-1]))
+        padded_latent[:k, :] = latent_vec
+        
+        # 创建交叉注意力的掩码 (1代表真实向量，0代表填充)
+        latent_mask = torch.zeros(self.max_latent)
+        latent_mask[:k] = 1
+        
+        # 2. 处理目标推理文本 (target_text)
+        # 将文本转换为模型需要的 ID
+        encoded_text = self.tokenizer(
+            item["target_text"],
+            truncation=True,
+            max_length=self.max_text_len,
+            padding="max_length",
+            return_tensors="pt"
+        )
+
+        return {
+            "latent_states": padded_latent,       # 用于 Cross-Attention
+            "latent_mask": latent_mask,           # 对应 Mask
+            "input_ids": encoded_text["input_ids"].squeeze(0),
+            "attention_mask": encoded_text["attention_mask"].squeeze(0),
+            "labels": encoded_text["input_ids"].squeeze(0).clone() # 用于计算 Loss
+        }
