@@ -16,27 +16,28 @@ class CoconutTranslator(nn.Module):
         )
         self.decoder = GPT2LMHeadModel(self.config)
 
-    def forward(self, latent_states, target_ids, attention_mask=None):
+    def forward(self, latent_states, latent_mask,input_ids, labels=None,attention_mask=None):
         """
         latent_states: (batch, k, 768) - 这里的 k 是 1, 2 或 3
         target_ids: (batch, seq_len) - 推理步骤的 Token ID
         """
         # labels 用于计算 CrossEntropy Loss
         outputs = self.decoder(
-            input_ids=target_ids,
+            input_ids=input_ids,
             attention_mask=attention_mask,
-            encoder_hidden_states=latent_states, # 将潜状态作为“记忆”输入
-            labels=target_ids
+            encoder_hidden_states=latent_states,
+            encoder_attention_mask=latent_mask,
+            labels=labels
         )
         return outputs.loss, outputs.logits
 
     @torch.no_grad()
-    def translate(self, latent_states, tokenizer, max_new_tokens=30):
+    def translate(self, latent_states, context_text, tokenizer, max_new_tokens=30):
         """用于推理：将向量翻译回文字"""
         device = latent_states.device
         # 初始输入为起始符
-        generated = torch.tensor([[tokenizer.bos_token_id]], device=device)
-        
+        generated = tokenizer(context_text, return_tensors="pt")["input_ids"].to(device)
+        context_len = generated.shape[1]
         for _ in range(max_new_tokens):
             outputs = self.decoder(
                 input_ids=generated,
@@ -48,4 +49,4 @@ class CoconutTranslator(nn.Module):
             
             if next_token.item() == tokenizer.eos_token_id:
                 break
-        return generated
+        return generated[:, context_len:]

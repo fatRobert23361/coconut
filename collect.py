@@ -73,6 +73,9 @@ def extract_and_save():
                 
                 # we use c_thought=1 here
                 current_latent = outputs.latent_states[stage - 1] 
+                # context_ids = outputs.latent_contexts[stage - 1][0]
+                # context_text = tokenizer.decode(context_ids, skip_special_tokens=True)
+                context_text = get_context(raw_train_data[idx]["question"], raw_train_data[idx]["steps"], stage)
             if current_latent is None:
                 print(f"skipped idx {idx} at stage {stage} due to empty latent")
                 continue
@@ -81,7 +84,7 @@ def extract_and_save():
             data_pair = {
                 "latent_vec": current_latent.cpu(),     
                 "target_text": target_step_text,         
-                "question": raw_train_data[idx]["question"],
+                "context_text": context_text,
                 "metadata": {         
                     "stage": stage,                      
                     "original_idx": idx
@@ -119,9 +122,15 @@ def merge_by_stage(source_dir, target_dir):
         save_path = os.path.join(target_dir, f"{stage}_combined.pt")
         torch.save(all_samples, save_path)
         print(f" {save_path} has {len(all_samples)} rows of data)")
+        
+def get_context(question, steps, stage):
+    if stage == 1:
+        return question
+    else:
+        return question + " " + " ".join(steps[:stage-1])
 
 if __name__ == "__main__":
     SOURCE = "extracted_dataset"
-    TARGET = "data/coconut_prosqa_gpt2"
+    TARGET = "data/coconut_prosqa_gpt2_context"
     merge_by_stage(SOURCE, TARGET)
     # extract_and_save()

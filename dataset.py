@@ -326,7 +326,7 @@ def get_cot_latent_dataset(
     return dataset
 
 class CoconutTranslatorDataset(TorchDataset):
-    def __init__(self, data_path, tokenizer, max_latent=3, max_text_len=64):
+    def __init__(self, data_path, tokenizer, max_latent=3, max_text_len=128):
         """
         data_path: 合并后的 .pt 文件路径 (如 'merged_dataset/s1_combined.pt')
         tokenizer: 翻译器使用的 tokenizer
@@ -368,25 +368,32 @@ class CoconutTranslatorDataset(TorchDataset):
         # 形状: (3, 768)
         padded_latent = torch.zeros((self.max_latent, latent_vec.shape[-1]))
         padded_latent[:k, :] = latent_vec
-        
         # 创建交叉注意力的掩码 (1代表真实向量，0代表填充)
         latent_mask = torch.zeros(self.max_latent)
         latent_mask[:k] = 1
         
-        # 2. 处理目标推理文本 (target_text)
-        # 将文本转换为模型需要的 ID
-        encoded_text = self.tokenizer(
-            item["target_text"],
-            truncation=True,
-            max_length=self.max_text_len,
-            padding="max_length",
-            return_tensors="pt"
-        )
+        # tokenize context
+        context_text = item.get("context_text", "")
+        target_text = item.get("target_text", "")
+        tokenized_context = self.tokenizer(context_text, add_special_tokens=False)      
+        tokenized_target = self.tokenizer(target_text, add_special_tokens=False)
+        tokenized_target["input_ids"].append(self.tokenizer.eos_token_id)
+        
+        input_ids = tokenized_context["input_ids"] + tokenized_target["input_ids"]
+        labels = [-100] * len(tokenized_context["input_ids"]) + tokenized_target["input_ids"]
+        
+        padding_length = self.max_text_len - len(input_ids)
+        if padding_length > 0:
+            input_ids += [self.tokenizer.pad_token_id] * padding_length
+            labels += [-100] * padding_length
+        else:
+            input_ids = input_ids[:self.max_text_len]
+            labels = labels[:self.max_text_len]
 
         return {
             "latent_states": padded_latent,       # 用于 Cross-Attention
             "latent_mask": latent_mask,           # 对应 Mask
-            "input_ids": encoded_text["input_ids"].squeeze(0),
-            "attention_mask": encoded_text["attention_mask"].squeeze(0),
-            "labels": encoded_text["input_ids"].squeeze(0).clone() # 用于计算 Loss
+            "input_ids": torch.tensor(input_ids),
+            "labels": torch.tensor(labels),
+            "attention_mask": torch.tensor([1] * len(input_ids) + [0] * (self.max_text_len - len(input_ids)))
         }
