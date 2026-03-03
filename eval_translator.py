@@ -15,7 +15,7 @@ def evaluate_translator(stage_num, model_path, dataset, tokenizer):
 
     results = []
     total_bleu = 0
-    smoothie = SmoothingFunction().method1 # 必须加上平滑，否则短句全是 0 分
+    smoothie = SmoothingFunction().method1 
 
     num_samples = len(dataset)
     num_eval = min(1000, num_samples)
@@ -25,25 +25,20 @@ def evaluate_translator(stage_num, model_path, dataset, tokenizer):
     for i in tqdm(range(num_eval), desc=f"Evaluating Stage {stage_num}"):
         item = dataset[i]
         
-        # --- 核心逻辑修改点 1: 拆分 Context 和 Ground Truth ---
-        # 在 Dataset 中，labels 为 -100 的地方对应的是 Context
+
         input_ids = item["input_ids"]
         labels = item["labels"]
         
         context_ids = input_ids[labels == -100]
         target_ids = input_ids[(labels != -100) & (input_ids != tokenizer.pad_token_id)]
         
-        # 将 Context 转回文本，喂给翻译器
         context_text = tokenizer.decode(context_ids, skip_special_tokens=True)
-        # 将 Target 转回文本，作为对比基准
         target_text = tokenizer.decode(target_ids, skip_special_tokens=True).strip()
         
         # --- 核心逻辑修改点 2: 准备向量和掩码 ---
         latent_vec = item["latent_states"].unsqueeze(0).to(device) # (1, 3, 768)
         # 如果你训练时用了 latent_mask，推理时也建议传入（虽然 batch_size=1 时全1即可）
         
-        # --- 核心逻辑修改点 3: 调用新的 translate 接口 ---
-        # 现在的 translate 只会返回新生成的推理步骤，不含 context
         generated_ids = model.translate(latent_vec, context_text, tokenizer, max_new_tokens=40)
         generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True).strip()
 
