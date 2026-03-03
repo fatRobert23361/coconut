@@ -20,6 +20,7 @@ def evaluate_translator(stage_num, model_path, dataset, tokenizer):
     num_samples = len(dataset)
     num_eval = min(1000, num_samples)
     print(f"\n开始评估 Stage {stage_num}... (样本数: {num_eval})")
+    correct_num = 0
 
     for i in tqdm(range(num_eval), desc=f"Evaluating Stage {stage_num}"):
         item = dataset[i]
@@ -58,9 +59,12 @@ def evaluate_translator(stage_num, model_path, dataset, tokenizer):
             "pred": generated_text,
             "bleu": score
         })
+        if target_text == generated_text:
+            correct_num += 1
 
     avg_bleu = total_bleu / num_eval
-    print(f"\nStage {stage_num} Average BLEU: {avg_bleu:.4f}")
+    accuracy = correct_num / num_eval
+    print(f"\nStage {stage_num} Average BLEU: {avg_bleu:.4f}, Accuracy: {accuracy:.4f}")
     
     # 打印前 3 条结果
     print("-" * 30)
@@ -72,7 +76,7 @@ def evaluate_translator(stage_num, model_path, dataset, tokenizer):
         print(f"Single BLEU  : {results[i]['bleu']:.4f}")
     print("-" * 30)
     
-    return avg_bleu
+    return avg_bleu, accuracy
 
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained("gpt2")

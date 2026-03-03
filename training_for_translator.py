@@ -8,13 +8,26 @@ import os
 # 假设你已经定义了 CoconutTranslator 和 CoconutTranslatorDataset
 from translator import CoconutTranslator
 from dataset import CoconutTranslatorDataset
+from eval_translator import evaluate_translator
+import wandb
 
-def train_translator_stage(stage_num, data_path, save_dir="translator_models"):
+def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosqa_s1"):
     # --- 1. 参数配置 ---
     BATCH_SIZE = 32
     EPOCHS = 15
     LEARNING_RATE = 5e-5
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    wandb.init(project="coconut_translator_prosqa", 
+               group="GPT2_4Layer_Context512",
+               name=f"Stage_{stage_num}_Training",
+               config={
+                   "stage": stage_num,
+                   "batch_size": BATCH_SIZE,
+                   "epochs": EPOCHS,
+                   "learning_rate": LEARNING_RATE
+               }
+    )
     
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -40,6 +53,8 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_models"):
     # hidden_size 为 768，vocab_size 为 50260
     model = CoconutTranslator(hidden_size=768, vocab_size=len(tokenizer)).to(DEVICE)
     
+    wandb.watch(model, log="all", log_freq=100)
+    
     # 如果是数据量极少的 Stage 6，可以考虑加载 Stage 1 的模型进行微调
     if stage_num == 6:
         s1_path = os.path.join(save_dir, "translator_s1_best.pt")
@@ -57,8 +72,9 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_models"):
         model.train()
         total_train_loss = 0
         pbar = tqdm(train_loader, desc=f"Stage {stage_num} Epoch {epoch+1}/{EPOCHS}")
+        running_loss = 0.0
         
-        for batch in pbar:
+        for batch_idx, batch in enumerate(pbar):
             optimizer.zero_grad()
             
             # latent_states: (batch, 3, 768)
@@ -75,7 +91,13 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_models"):
             optimizer.step()
             
             total_train_loss += loss.item()
+            running_loss += loss.item()
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            if batch_idx % 10 == 0:
+                avg_loss = running_loss / 10
+                running_loss = 0.0
+                wandb.log({"train_loss": avg_loss, "epoch": epoch})
+                
         
         # 验证
         model.eval()
@@ -92,15 +114,36 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_models"):
                 total_val_loss += v_loss.item()
         
         avg_val_loss = total_val_loss / len(val_loader)
-        print(f"Average Val Loss: {avg_val_loss:.4f}")
+        avg_train_loss = total_train_loss / len(train_loader)
+        print(f"Average Train Loss: {avg_train_loss:.4f}, Average Val Loss: {avg_val_loss:.4f}")
+        wandb.log({
+            "average_train_loss_epoch": avg_train_loss,
+            "val_loss": avg_val_loss,
+            "epoch": epoch
+        })
 
         # 保存最优模型
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            save_path = os.path.join(save_dir, f"translator_s{stage_num}_best.pt")
-            torch.save(model.state_dict(), save_path)
-            print(f"最优模型已保存至: {save_path}")
+        # if avg_val_loss < best_val_loss:
+        #     best_val_loss = avg_val_loss
+        #     save_path = os.path.join(save_dir, f"translator_s{stage_num}_best.pt")
+        #     torch.save(model.state_dict(), save_path)
+        #     print(f"最优模型已保存至: {save_path}")
+        
+        save_path = os.path.join(save_dir, f"translator_s{stage_num}_epoch{epoch+1}.pt")
+        torch.save(model.state_dict(), save_path)
+        print(f"模型已保存至: {save_path}")
+        
+        avg_bleu, accuracy = evaluate_translator(stage_num, save_path, val_ds, tokenizer)
+        wandb.log({
+            "eval_bleu": avg_bleu,
+            "eval_accuracy": accuracy
+        })
+
+    wandb.finish()
 
 if __name__ == "__main__":
     # 示例：先训练数据最充足的 Stage 1
-    train_translator_stage(stage_num=1, data_path="/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s1_combined.pt")
+    # train_translator_stage(stage_num=1, data_path="/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s1_combined.pt")
+    for stage in range(1, 7):
+        data_path = f"/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s{stage}_combined.pt"
+        train_translator_stage(stage_num=stage, data_path=data_path, save_dir=f"translator_gpt2_prosqa_s{stage}")
