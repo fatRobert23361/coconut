@@ -1,7 +1,7 @@
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, get_cosine_schedule_with_warmup
 from tqdm import tqdm
 import os
 
@@ -15,7 +15,9 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
     # --- 1. 参数配置 ---
     BATCH_SIZE = 32
     EPOCHS = 15
-    LEARNING_RATE = 5e-5
+    LEARNING_RATE = 2e-5
+    WEIGHT_DECAY = 0.01
+    WARMUP_RATIO = 0.1
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     wandb.init(project="coconut_translator_prosqa", 
@@ -25,7 +27,9 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
                    "stage": stage_num,
                    "batch_size": BATCH_SIZE,
                    "epochs": EPOCHS,
-                   "learning_rate": LEARNING_RATE
+                   "learning_rate": LEARNING_RATE,
+                   "weight_decay": WEIGHT_DECAY,
+                   "warmup_ratio": WARMUP_RATIO
                }
     )
     
@@ -63,7 +67,10 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
             model.load_state_dict(torch.load(s1_path))
             LEARNING_RATE = 1e-5 # 微调时使用更小的学习率
 
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    total_steps = len(train_loader)*EPOCHS
+    warm_up_steps = int(WARMUP_RATIO * total_steps)
+    scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warm_up_steps, num_training_steps=total_steps)
 
     # --- 4. 训练循环 ---
     best_val_loss = float('inf')
@@ -89,6 +96,7 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
             
             loss.backward()
             optimizer.step()
+            scheduler.step()
             
             total_train_loss += loss.item()
             running_loss += loss.item()
@@ -96,7 +104,7 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
             if batch_idx % 10 == 0:
                 avg_loss = running_loss / 10
                 running_loss = 0.0
-                wandb.log({"train_loss": avg_loss, "epoch": epoch})
+                wandb.log({"train_loss": avg_loss, "epoch": epoch, "learning_rate": scheduler.get_last_lr()[0]})
                 
         
         # 验证
@@ -135,8 +143,8 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
         
         avg_bleu, accuracy = evaluate_translator(stage_num, save_path, val_ds, tokenizer)
         wandb.log({
-            "eval_bleu": avg_bleu,
-            "eval_accuracy": accuracy
+            "val_bleu": avg_bleu,
+            "val_accuracy": accuracy
         })
 
     wandb.finish()
