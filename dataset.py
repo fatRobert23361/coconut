@@ -326,12 +326,12 @@ def get_cot_latent_dataset(
     return dataset
 
 class CoconutTranslatorDataset(TorchDataset):
-    def __init__(self, data_path, tokenizer, max_latent=3, max_text_len=128, mode="context+latent"):
+    def __init__(self, data_path, tokenizer, max_latent=3, max_text_len=128, mode="context_latent"):
         """
         data_path: 合并后的 .pt 文件路径 (如 'merged_dataset/s1_combined.pt')
         tokenizer: 翻译器使用的 tokenizer
         max_latent: 最大的连续想法数量 (1, 2, 或 3)
-        mode: 数据集模式，"context+latent" 或 "latent"
+        mode: 数据集模式，"context_latent" 或 "latent"
         """
         print(f"Loading data from {data_path}...")
         # 直接加载合并后的列表
@@ -375,7 +375,7 @@ class CoconutTranslatorDataset(TorchDataset):
         latent_mask[:k] = 1
         
         # tokenize context
-        if self.mode in [0, 2]: # 如果需要上下文
+        if self.mode in [1, 2]: # 如果需要上下文
             context_text = item.get("context_text", "")
             tokenized_context = self.tokenizer(context_text, add_special_tokens=False)
         else:

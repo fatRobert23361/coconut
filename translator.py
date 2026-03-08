@@ -3,7 +3,7 @@ import torch.nn as nn
 from transformers import GPT2Config, GPT2LMHeadModel
 
 class CoconutTranslator(nn.Module):
-    def __init__(self, hidden_size=768, vocab_size=50260, mode="context+latent"):
+    def __init__(self, hidden_size=768, vocab_size=50260, mode="context_latent"):
         super().__init__()
         # 配置一个轻量级的 GPT-2 作为解码器
         # 必须开启 add_cross_attention 以接收潜状态向量
@@ -23,7 +23,7 @@ class CoconutTranslator(nn.Module):
         )
         self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=self.config)
 
-    def forward(self, latent_states, latent_mask, input_ids, labels=None,attention_mask=None):
+    def forward(self, latent_states, latent_mask, input_ids, labels=None, attention_mask=None):
         """
         latent_states: (batch, k, 768) - 这里的 k 是 1, 2 或 3
         target_ids: (batch, seq_len) - 推理步骤的 Token ID
@@ -51,6 +51,8 @@ class CoconutTranslator(nn.Module):
         device = latent_states.device
         # 初始输入为起始符
         generated = tokenizer(context_text, return_tensors="pt")["input_ids"].to(device)
+        if self.mode == 0 or generated.shape[1]==0:
+            generated = torch.tensor([[tokenizer.eos_token_id]], device=device)
         context_len = generated.shape[1]
         for _ in range(max_new_tokens):
             if self.mode in [0,2]:

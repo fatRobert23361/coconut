@@ -11,7 +11,7 @@ from dataset import CoconutTranslatorDataset
 from eval_translator import evaluate_translator
 import wandb
 
-def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosqa_s1"):
+def train_translator_stage(stage_num, data_path, mode="context_latent", save_dir="translator_gpt2_prosqa_s1"):
     # --- 1. 参数配置 ---
     BATCH_SIZE = 32
     EPOCHS = 15
@@ -22,9 +22,10 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
     
     wandb.init(project="coconut_translator_prosqa", 
                group="GPT2_4Layer_Context512",
-               name=f"Stage_{stage_num}_Training",
+               name=f"Stage_{stage_num}_Training_{mode}",
                config={
                    "stage": stage_num,
+                   "mode": mode,
                    "batch_size": BATCH_SIZE,
                    "epochs": EPOCHS,
                    "learning_rate": LEARNING_RATE,
@@ -44,7 +45,7 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
     # --- 2. 数据准备 ---
     print(f"正在加载 Stage {stage_num} 的合并数据: {data_path}")
     # 使用之前定义的 Dataset 类处理列表数据
-    dataset = CoconutTranslatorDataset(data_path, tokenizer, max_latent=3, max_text_len=512) 
+    dataset = CoconutTranslatorDataset(data_path, tokenizer, max_latent=3, max_text_len=512, mode=mode) 
     
     train_size = int(0.9 * len(dataset))
     val_size = len(dataset) - train_size
@@ -55,7 +56,7 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
 
     # --- 3. 初始化翻译器 ---
     # hidden_size 为 768，vocab_size 为 50260
-    model = CoconutTranslator(hidden_size=768, vocab_size=len(tokenizer)).to(DEVICE)
+    model = CoconutTranslator(hidden_size=768, vocab_size=len(tokenizer), mode=mode).to(DEVICE)
     
     wandb.watch(model, log="all", log_freq=100)
     
@@ -141,7 +142,7 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
         torch.save(model.state_dict(), save_path)
         print(f"模型已保存至: {save_path}")
         
-        avg_bleu, accuracy = evaluate_translator(stage_num, save_path, val_ds, tokenizer)
+        avg_bleu, accuracy = evaluate_translator(stage_num, save_path, val_ds, tokenizer, mode=mode)
         wandb.log({
             "val_bleu": avg_bleu,
             "val_accuracy": accuracy
@@ -152,6 +153,8 @@ def train_translator_stage(stage_num, data_path, save_dir="translator_gpt2_prosq
 if __name__ == "__main__":
     # 示例：先训练数据最充足的 Stage 1
     # train_translator_stage(stage_num=1, data_path="/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s1_combined.pt")
-    for stage in range(1, 7):
-        data_path = f"/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s{stage}_combined.pt"
-        train_translator_stage(stage_num=stage, data_path=data_path, save_dir=f"translator_gpt2_prosqa_s{stage}")
+    for mode in ["latent_only", "context_only"]:
+    # for mode in ["latent_only"]:
+        for stage in range(1, 7):
+            data_path = f"/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s{stage}_combined.pt"
+            train_translator_stage(stage_num=stage, data_path=data_path, mode=mode, save_dir=f"translator_models/{mode}/translator_gpt2_prosqa_s{stage}")

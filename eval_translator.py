@@ -5,12 +5,13 @@ from tqdm import tqdm
 from dataset import CoconutTranslatorDataset
 from translator import CoconutTranslator
 
-def evaluate_translator(stage_num, model_path, dataset, tokenizer):
+def evaluate_translator(stage_num, model_path, dataset, tokenizer, mode="context_latent"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     # 1. 加载模型
-    model = CoconutTranslator(hidden_size=768, vocab_size=len(tokenizer)).to(device)
+    model = CoconutTranslator(hidden_size=768, vocab_size=len(tokenizer), mode=mode).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
+    mode = 0 if mode == "latent_only" else 1 if mode == "context_only" else 2
     model.eval()
 
     results = []
@@ -31,8 +32,8 @@ def evaluate_translator(stage_num, model_path, dataset, tokenizer):
         
         context_ids = input_ids[labels == -100]
         target_ids = input_ids[(labels != -100) & (input_ids != tokenizer.pad_token_id)]
-        
-        context_text = tokenizer.decode(context_ids, skip_special_tokens=True)
+
+        context_text = tokenizer.decode(context_ids, skip_special_tokens=True).strip()
         target_text = tokenizer.decode(target_ids, skip_special_tokens=True).strip()
         
         # --- 核心逻辑修改点 2: 准备向量和掩码 ---
