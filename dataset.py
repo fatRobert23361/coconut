@@ -326,11 +326,12 @@ def get_cot_latent_dataset(
     return dataset
 
 class CoconutTranslatorDataset(TorchDataset):
-    def __init__(self, data_path, tokenizer, max_latent=3, max_text_len=128):
+    def __init__(self, data_path, tokenizer, max_latent=3, max_text_len=128, mode="context+latent"):
         """
         data_path: 合并后的 .pt 文件路径 (如 'merged_dataset/s1_combined.pt')
         tokenizer: 翻译器使用的 tokenizer
         max_latent: 最大的连续想法数量 (1, 2, 或 3)
+        mode: 数据集模式，"context+latent" 或 "latent"
         """
         print(f"Loading data from {data_path}...")
         # 直接加载合并后的列表
@@ -348,6 +349,7 @@ class CoconutTranslatorDataset(TorchDataset):
         self.tokenizer = tokenizer
         self.max_latent = max_latent
         self.max_text_len = max_text_len
+        self.mode = 0 if mode == "latent_only" else 1 if mode == "context_only" else 2 
 
     def __len__(self):
         return len(self.samples)
@@ -373,9 +375,12 @@ class CoconutTranslatorDataset(TorchDataset):
         latent_mask[:k] = 1
         
         # tokenize context
-        context_text = item.get("context_text", "")
-        target_text = item.get("target_text", "")
-        tokenized_context = self.tokenizer(context_text, add_special_tokens=False)      
+        if self.mode in [0, 2]: # 如果需要上下文
+            context_text = item.get("context_text", "")
+            tokenized_context = self.tokenizer(context_text, add_special_tokens=False)
+        else:
+            tokenized_context = self.tokenizer(self.tokenizer.eos_token, add_special_tokens=False) # 仅使用一个 EOS 作为占位符)
+        target_text = item.get("target_text", "")      
         tokenized_target = self.tokenizer(target_text, add_special_tokens=False)
         tokenized_target["input_ids"].append(self.tokenizer.eos_token_id)
         
@@ -395,5 +400,5 @@ class CoconutTranslatorDataset(TorchDataset):
             "latent_mask": latent_mask,           # 对应 Mask
             "input_ids": torch.tensor(input_ids),
             "labels": torch.tensor(labels),
-            "attention_mask": torch.tensor([1] * len(input_ids) + [0] * (self.max_text_len - len(input_ids)))
+            "attention_mask": torch.tensor(torch.tensor(input_ids) != self.tokenizer.pad_token_id, dtype=torch.long)
         }
