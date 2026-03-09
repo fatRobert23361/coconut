@@ -16,6 +16,7 @@ def train_translator_stage(stage_num, data_path, mode="context_latent", save_dir
     BATCH_SIZE = 32
     EPOCHS = 15
     LEARNING_RATE = 2e-5
+    CROSS_LEARNING_RATE = 1e-3
     WEIGHT_DECAY = 0.01
     WARMUP_RATIO = 0.1
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,6 +30,7 @@ def train_translator_stage(stage_num, data_path, mode="context_latent", save_dir
                    "batch_size": BATCH_SIZE,
                    "epochs": EPOCHS,
                    "learning_rate": LEARNING_RATE,
+                   "cross_learning_rate": CROSS_LEARNING_RATE,
                    "weight_decay": WEIGHT_DECAY,
                    "warmup_ratio": WARMUP_RATIO
                }
@@ -68,7 +70,7 @@ def train_translator_stage(stage_num, data_path, mode="context_latent", save_dir
             model.load_state_dict(torch.load(s1_path))
             LEARNING_RATE = 1e-5 # 微调时使用更小的学习率
 
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimizer = get_optimizer(model, base_lr=LEARNING_RATE, cross_lr=CROSS_LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     total_steps = len(train_loader)*EPOCHS
     warm_up_steps = int(WARMUP_RATIO * total_steps)
     scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warm_up_steps, num_training_steps=total_steps)
@@ -150,11 +152,41 @@ def train_translator_stage(stage_num, data_path, mode="context_latent", save_dir
 
     wandb.finish()
 
+def get_optimizer(model, base_lr=2e-5, cross_lr=1e-3, weight_decay=0.01):
+    cross_attn_params = []
+    base_params = []
+    
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if "crossattention" in name or "ln_cross_attn" in name:
+            cross_attn_params.append(param)
+        else:
+            base_params.append(param)
+            
+    
+    optimizer_grouped_parameters = [
+        {
+            "params": base_params, 
+            "lr": base_lr, 
+            "weight_decay": weight_decay
+        },
+        {
+            "params": cross_attn_params, 
+            "lr": cross_lr, 
+            "weight_decay": weight_decay
+        }
+    ]
+    
+    
+    optimizer = optim.AdamW(optimizer_grouped_parameters)
+    return optimizer
+
 if __name__ == "__main__":
     # 示例：先训练数据最充足的 Stage 1
     # train_translator_stage(stage_num=1, data_path="/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s1_combined.pt")
-    for mode in ["latent_only", "context_only"]:
-    # for mode in ["latent_only"]:
+    # for mode in ["latent_only", "context_only"]:
+    for mode in ["context_latent","latent_only"]:
         for stage in range(1, 7):
             data_path = f"/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s{stage}_combined.pt"
-            train_translator_stage(stage_num=stage, data_path=data_path, mode=mode, save_dir=f"translator_models/{mode}/translator_gpt2_prosqa_s{stage}")
+            train_translator_stage(stage_num=stage, data_path=data_path, mode=mode, save_dir=f"translator_models/{mode}/translator_gpt2_prosqa_s{stage}_optimizer")
