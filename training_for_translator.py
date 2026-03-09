@@ -16,12 +16,11 @@ def train_translator_stage(stage_num, data_path, mode="context_latent", save_dir
     BATCH_SIZE = 32
     EPOCHS = 15
     LEARNING_RATE = 2e-5
-    CROSS_LEARNING_RATE = 1e-3
     WEIGHT_DECAY = 0.01
     WARMUP_RATIO = 0.1
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    wandb.init(project="coconut_translator_prosqa", 
+    wandb.init(project="coconut_translator_prosqa_latent_as_embedding", 
                group="GPT2_4Layer_Context512",
                name=f"Stage_{stage_num}_Training_{mode}",
                config={
@@ -70,7 +69,7 @@ def train_translator_stage(stage_num, data_path, mode="context_latent", save_dir
             model.load_state_dict(torch.load(s1_path))
             LEARNING_RATE = 1e-5 # 微调时使用更小的学习率
 
-    optimizer = get_optimizer(model, base_lr=LEARNING_RATE, cross_lr=CROSS_LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     total_steps = len(train_loader)*EPOCHS
     warm_up_steps = int(WARMUP_RATIO * total_steps)
     scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warm_up_steps, num_training_steps=total_steps)
@@ -186,7 +185,7 @@ if __name__ == "__main__":
     # 示例：先训练数据最充足的 Stage 1
     # train_translator_stage(stage_num=1, data_path="/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s1_combined.pt")
     # for mode in ["latent_only", "context_only"]:
-    for mode in ["context_latent","latent_only"]:
+    for mode in ["latent_only"]:
         for stage in range(1, 7):
             data_path = f"/home/haoyang/haoyang/coconut/data/coconut_prosqa_gpt2_context/s{stage}_combined.pt"
             train_translator_stage(stage_num=stage, data_path=data_path, mode=mode, save_dir=f"translator_models/{mode}/translator_gpt2_prosqa_s{stage}_optimizer")

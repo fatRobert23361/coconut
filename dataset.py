@@ -402,3 +402,59 @@ class CoconutTranslatorDataset(TorchDataset):
             "labels": torch.tensor(labels),
             "attention_mask": torch.tensor(torch.tensor(input_ids) != self.tokenizer.pad_token_id, dtype=torch.long)
         }
+
+class CoconutPureLatentDataset(TorchDataset):
+    def __init__(self, data_path, tokenizer, max_text_len=64):
+        """
+        data_path: .pt 文件路径
+        tokenizer: GPT-2 tokenizer
+        max_text_len: 目标文本的最大长度
+        """
+        print(f"Loading data for Pure Latent training from {data_path}...")
+        self.samples = torch.load(data_path) 
+        self.tokenizer = tokenizer
+        self.max_text_len = max_text_len
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        item = self.samples[idx]
+        
+        # 1. 处理潜状态向量
+        latent_vec = item["latent_vec"] # 假设形状是 [768] 或 [1, 768]
+        if latent_vec.dim() > 1:
+            latent_vec = latent_vec.squeeze() # 确保是 [768] 的 1D 向量
+            
+        # 2. 处理目标推理步骤 (Target Text)
+        target_text = item.get("target_text", "")
+        # 只对目标文本进行 tokenize
+        tokenized_target = self.tokenizer(
+            target_text, 
+            add_special_tokens=False, 
+            truncation=True, 
+            max_length=self.max_text_len - 1
+        )["input_ids"]
+        tokenized_target.append(self.tokenizer.eos_token_id) # 加入终止符
+        
+        # 3. 构造 input_ids 和 labels (注意：这里的 input_ids 不包含向量位置)
+        input_ids = tokenized_target
+        labels = tokenized_target # 目标文本全部作为标签计算 Loss
+        
+        # 4. Padding
+        padding_length = self.max_text_len - len(input_ids)
+        if padding_length > 0:
+            input_ids += [self.tokenizer.pad_token_id] * padding_length
+            labels += [-100] * padding_length
+            attention_mask = [1] * len(tokenized_target) + [0] * padding_length
+        else:
+            input_ids = input_ids[:self.max_text_len]
+            labels = labels[:self.max_text_len]
+            attention_mask = [1] * self.max_text_len
+
+        return {
+            "latent_states": latent_vec.float(), # [768]
+            "input_ids": torch.tensor(input_ids), # [Seq_Len]
+            "labels": torch.tensor(labels),       # [Seq_Len]
+            "attention_mask": torch.tensor(attention_mask) # [Seq_Len]
+        }
