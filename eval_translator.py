@@ -2,8 +2,9 @@ import torch
 from transformers import AutoTokenizer
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from tqdm import tqdm
-from dataset import CoconutTranslatorDataset
+from dataset import CoconutTranslatorDataset, CoconutPureLatentDataset
 from translator import CoconutTranslator
+from translator_v2 import CoconutTranslator as CoconutSoftPromptTranslator
 
 def evaluate_translator(stage_num, model_path, dataset, tokenizer, mode="context_latent"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -67,6 +68,146 @@ def evaluate_translator(stage_num, model_path, dataset, tokenizer, mode="context
     for i in range(min(10, len(results))):
         print(f"\nExample {i+1}:")
         print(f"Context      : {results[i]['context']}")
+        print(f"Ground Truth : {results[i]['target']}")
+        print(f"Translated   : {results[i]['pred']}")
+        print(f"Single BLEU  : {results[i]['bleu']:.4f}")
+    print("-" * 30)
+    
+    return avg_bleu, accuracy
+
+def evaluate_pure_latent_translator(model_path, dataset, tokenizer):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 1. 加载模型 (注意：使用 SoftPrompt 架构)
+    model = CoconutSoftPromptTranslator(hidden_size=768).to(device)
+    # 加载保存的权重
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+
+    results = []
+    total_bleu = 0
+    smoothie = SmoothingFunction().method1 
+    correct_num = 0
+
+    num_eval = min(1000, len(dataset))
+    print(f"\n开始评估 Pure Latent Stage... (样本数: {num_eval})")
+
+    for i in tqdm(range(num_eval), desc="Evaluating"):
+        item = dataset[i]
+        
+        # 1. 准备 Latent 向量
+        # [768] -> [1, 768]
+        latent_vec = item["latent_states"].unsqueeze(0).to(device) 
+        
+        # 2. 准备 Ground Truth 文本用于对比
+        # 过滤掉 -100 的 labels 得到原始 target_ids
+        target_ids = item["labels"][item["labels"] != -100]
+        target_text = tokenizer.decode(target_ids, skip_special_tokens=True).strip()
+        
+        # 3. 推理生成 (仅依靠向量)
+        # 调用新版 translate，内部自动处理 BOS+Start+Latent+End 拼接
+        generated_ids = model.translate(latent_vec, max_new_tokens=40)
+        generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True).strip()
+
+        # 4. 计算指标
+        reference = [target_text.split()]
+        candidate = generated_text.split()
+        score = sentence_bleu(reference, candidate, smoothing_function=smoothie)
+        total_bleu += score
+
+        if target_text == generated_text:
+            correct_num += 1
+
+        results.append({
+            "target": target_text,
+            "pred": generated_text,
+            "bleu": score
+        })
+
+    avg_bleu = total_bleu / num_eval
+    accuracy = correct_num / num_eval
+    print(f"\nEvaluation Results:")
+    print(f"Average BLEU: {avg_bleu:.4f}, Accuracy: {accuracy:.4f}")
+    
+    # 打印前 10 条对比结果
+    print("-" * 30)
+    for i in range(min(10, len(results))):
+        print(f"\nExample {i+1}:")
+        print(f"Ground Truth : {results[i]['target']}")
+        print(f"Translated   : {results[i]['pred']}")
+        print(f"Single BLEU  : {results[i]['bleu']:.4f}")
+    print("-" * 30)
+    
+    return avg_bleu, accuracy
+
+import torch
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from tqdm import tqdm
+
+def evaluate_context_latent_translator(model_path, dataset, tokenizer):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 1. 加载模型 (注意：传入 len(tokenizer) 避免之前的 TypeError)
+    # 假设你的类名还是 CoconutTranslator
+    from translator_v2 import CoconutTranslator 
+    model = CoconutSoftPromptTranslator(hidden_size=768).to(device)
+    
+    # 加载权重
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+
+    results = []
+    total_bleu = 0
+    smoothie = SmoothingFunction().method1 
+    correct_num = 0
+
+    num_eval = min(500, len(dataset)) # 评估 500 条足够看清趋势
+    print(f"\n开始评估 Context + Latent 模式... (样本数: {num_eval})")
+
+    for i in tqdm(range(num_eval), desc="Evaluating"):
+        item = dataset[i]
+        
+        # 1. 准备输入 (增加 context_ids)
+        latent_vec = item["latent_states"].unsqueeze(0).to(device) 
+        context_ids = item["context_ids"].unsqueeze(0).to(device)
+        
+        # 2. 准备 Ground Truth 文本
+        target_ids = item["labels"][item["labels"] != -100]
+        target_text = tokenizer.decode(target_ids, skip_special_tokens=True).strip()
+        
+        # 3. 推理生成 (必须传入 context_ids)
+        # 调用新版 translate: [Context] + [Start] + [Latent] + [End] -> 生成
+        generated_ids = model.translate(latent_vec, context_ids, max_new_tokens=40)
+        generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True).strip()
+
+        # 4. 计算指标
+        reference = [target_text.split()]
+        candidate = generated_text.split()
+        score = sentence_bleu(reference, candidate, smoothing_function=smoothie)
+        total_bleu += score
+
+        if target_text == generated_text:
+            correct_num += 1
+
+        # 记录结果，增加 context 文本用于观察
+        context_text = tokenizer.decode(item["context_ids"], skip_special_tokens=True).strip()
+        results.append({
+            "context": context_text,
+            "target": target_text,
+            "pred": generated_text,
+            "bleu": score
+        })
+
+    avg_bleu = total_bleu / num_eval
+    accuracy = correct_num / num_eval
+    print(f"\nEvaluation Results (Context+Latent):")
+    print(f"Average BLEU: {avg_bleu:.4f}, Accuracy: {accuracy:.4f}")
+    
+    # 打印前 10 条对比结果
+    print("-" * 30)
+    for i in range(min(10, len(results))):
+        print(f"\nExample {i+1}:")
+        print(f"Context      : {results[i]['context'][:100]}...") # 只打印前100字符
         print(f"Ground Truth : {results[i]['target']}")
         print(f"Translated   : {results[i]['pred']}")
         print(f"Single BLEU  : {results[i]['bleu']:.4f}")

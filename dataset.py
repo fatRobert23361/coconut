@@ -404,12 +404,7 @@ class CoconutTranslatorDataset(TorchDataset):
         }
 
 class CoconutPureLatentDataset(TorchDataset):
-    def __init__(self, data_path, tokenizer, max_text_len=64):
-        """
-        data_path: .pt 文件路径
-        tokenizer: GPT-2 tokenizer
-        max_text_len: 目标文本的最大长度
-        """
+    def __init__(self, data_path, tokenizer, max_text_len=512):
         print(f"Loading data for Pure Latent training from {data_path}...")
         self.samples = torch.load(data_path) 
         self.tokenizer = tokenizer
@@ -422,39 +417,115 @@ class CoconutPureLatentDataset(TorchDataset):
         item = self.samples[idx]
         
         # 1. 处理潜状态向量
-        latent_vec = item["latent_vec"] # 假设形状是 [768] 或 [1, 768]
+        latent_vec = item["latent_vec"]
         if latent_vec.dim() > 1:
-            latent_vec = latent_vec.squeeze() # 确保是 [768] 的 1D 向量
+            latent_vec = latent_vec.squeeze()
             
-        # 2. 处理目标推理步骤 (Target Text)
+        # 2. 处理目标文本
         target_text = item.get("target_text", "")
-        # 只对目标文本进行 tokenize
-        tokenized_target = self.tokenizer(
-            target_text, 
-            add_special_tokens=False, 
-            truncation=True, 
-            max_length=self.max_text_len - 1
-        )["input_ids"]
-        tokenized_target.append(self.tokenizer.eos_token_id) # 加入终止符
+        # 使用 truncation 确保不会超过最大长度
+        tokenized = self.tokenizer(
+            target_text,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=self.max_text_len - 1 # 预留一个位置给 EOS
+        )
         
-        # 3. 构造 input_ids 和 labels (注意：这里的 input_ids 不包含向量位置)
-        input_ids = tokenized_target
-        labels = tokenized_target # 目标文本全部作为标签计算 Loss
+        input_ids = tokenized["input_ids"] + [self.tokenizer.eos_token_id]
         
-        # 4. Padding
-        padding_length = self.max_text_len - len(input_ids)
-        if padding_length > 0:
-            input_ids += [self.tokenizer.pad_token_id] * padding_length
-            labels += [-100] * padding_length
-            attention_mask = [1] * len(tokenized_target) + [0] * padding_length
+        # 3. 严格执行 Padding 或 Truncation
+        curr_len = len(input_ids)
+        if curr_len < self.max_text_len:
+            # 需要填充
+            pad_len = self.max_text_len - curr_len
+            input_ids = input_ids + [self.tokenizer.pad_token_id] * pad_len
+            # Mask: 1 代表真实内容，0 代表填充
+            attention_mask = [1] * curr_len + [0] * pad_len
+            # Labels: 填充部分用 -100 忽略
+            labels = input_ids[:curr_len] + [-100] * pad_len
         else:
+            # 需要截断 (以防万一)
             input_ids = input_ids[:self.max_text_len]
-            labels = labels[:self.max_text_len]
             attention_mask = [1] * self.max_text_len
+            labels = input_ids[:]
 
+        # 4. 返回固定长度的 Tensor
         return {
             "latent_states": latent_vec.float(), # [768]
-            "input_ids": torch.tensor(input_ids), # [Seq_Len]
-            "labels": torch.tensor(labels),       # [Seq_Len]
-            "attention_mask": torch.tensor(attention_mask) # [Seq_Len]
+            "input_ids": torch.tensor(input_ids, dtype=torch.long), # [512]
+            "labels": torch.tensor(labels, dtype=torch.long),      # [512]
+            "attention_mask": torch.tensor(attention_mask, dtype=torch.long) # [512]
+        }
+        
+import torch
+from torch.utils.data import Dataset as TorchDataset
+
+class CoconutContextLatentDataset(TorchDataset):
+    def __init__(self, data_path, tokenizer, max_context_len=512, max_target_len=128):
+        """
+        max_context_len: 题干的最大长度
+        max_target_len: 目标推理步骤的最大长度
+        """
+        print(f"正在加载 Context+Latent 数据: {data_path}...")
+        self.samples = torch.load(data_path) 
+        self.tokenizer = tokenizer
+        self.max_context_len = max_context_len
+        self.max_target_len = max_target_len
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        item = self.samples[idx]
+        
+        # 1. 处理潜状态向量 (不变)
+        latent_vec = item["latent_vec"]
+        if latent_vec.dim() > 1:
+            latent_vec = latent_vec.squeeze()
+            
+        # 2. 处理 Context (题干文本)
+        # 我们使用 tokenizer 自动处理 Padding 和 Truncation 到固定长度
+        context_text = item.get("context", "")
+        context_enc = self.tokenizer(
+            context_text,
+            truncation=True,
+            max_length=self.max_context_len,
+            padding="max_length", # 强制对齐到 max_context_len
+            add_special_tokens=False,
+            return_tensors=None # 返回 list 方便后续操作
+        )
+        context_ids = context_enc["input_ids"]
+
+        # 3. 处理 Target (目标推理文本)
+        target_text = item.get("target_text", "")
+        # target 部分不使用 tokenizer 自动 padding，手动控制更精准
+        target_tokenized = self.tokenizer(
+            target_text,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=self.max_target_len - 1 # 预留给 EOS
+        )
+        
+        # 组装 target_ids 并加上 EOS
+        raw_target_ids = target_tokenized["input_ids"] + [self.tokenizer.eos_token_id]
+        
+        # 严格执行 Target 的 Padding/Truncation
+        curr_target_len = len(raw_target_ids)
+        if curr_target_len < self.max_target_len:
+            pad_len = self.max_target_len - curr_target_len
+            input_ids = raw_target_ids + [self.tokenizer.pad_token_id] * pad_len
+            attention_mask = [1] * curr_target_len + [0] * pad_len
+            labels = raw_target_ids + [-100] * pad_len
+        else:
+            input_ids = raw_target_ids[:self.max_target_len]
+            attention_mask = [1] * self.max_target_len
+            labels = input_ids[:]
+
+        # 4. 返回所有组件
+        return {
+            "latent_states": latent_vec.float(), # [768]
+            "context_ids": torch.tensor(context_ids, dtype=torch.long), # [max_context_len]
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),      # [max_target_len]
+            "labels": torch.tensor(labels, dtype=torch.long),            # [max_target_len]
+            "attention_mask": torch.tensor(attention_mask, dtype=torch.long) # [max_target_len]
         }
