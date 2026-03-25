@@ -11,7 +11,7 @@ from collections import defaultdict
 
 def extract_and_save():
     # load config
-    config_path = "args/prosqa_coconut.yaml"
+    config_path = "args/prosqa_coconut_eval.yaml"
     with open(config_path) as f:
         config_dict = yaml.safe_load(f)
     configs = Config(config_dict)
@@ -41,15 +41,15 @@ def extract_and_save():
     model.to(device).eval()
 
     # load the dataset
-    with open(configs.train_path) as f:
+    with open(configs.val_path) as f:
         raw_train_data = json.load(f)
     
     # get the tokenized dataset
-    base_dataset = get_dataset(configs.train_path, tokenizer)
+    base_dataset = get_dataset(configs.val_path, tokenizer)
     collator = MyCollator(tokenizer, latent_id=latent_id)
 
     
-    output_dir = "extracted_dataset"
+    output_dir = "extracted_dataset_test"
     os.makedirs(output_dir, exist_ok=True)
 
     # enumerate the inference stages

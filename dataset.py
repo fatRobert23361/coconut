@@ -35,6 +35,8 @@ def get_dataset(path, tokenizer, max_size=1000000000):
             "steps_tokenized": steps_tokenized,
             "answer_tokenized": answer_tokenized,
             "idx": sample["idx"],
+            "answer": sample["answer"],
+            "steps": sample["steps"],
         }
         return sample
 

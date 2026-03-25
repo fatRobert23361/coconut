@@ -21,7 +21,7 @@ class CoconutTranslator(nn.Module):
             n_head=12,
             add_cross_attention=False
         )
-        self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=self.config)
+        self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=self.config, ignore_mismatched_sizes=True)
 
     def forward(self, latent_states, latent_mask, input_ids, labels=None, attention_mask=None):
         """

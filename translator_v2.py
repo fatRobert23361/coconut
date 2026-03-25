@@ -28,11 +28,11 @@ class CoconutTranslator(nn.Module):
         self.decoder = GPT2LMHeadModel.from_pretrained("gpt2", config=self.config, ignore_mismatched_sizes=True)
         self.decoder.resize_token_embeddings(len(self.tokenizer))
         
-        self.start_id = self.tokenizer.convert_tokens_to_ids("<|start_latent|>")
-        self.end_id = self.tokenizer.convert_tokens_to_ids("<|end_latent|>")
+        self.start_id = self.tokenizer.convert_tokens_to_ids("<|start-latent|>")
+        self.end_id = self.tokenizer.convert_tokens_to_ids("<|end-latent|>")
         self.bos_id = self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
 
-    def forward(self, latent_states, context_ids,input_ids, labels=None, attention_mask=None):
+    def forward(self, latent_states, context_ids, input_ids, labels=None, attention_mask=None):
         batch_size = latent_states.shape[0]
         device = latent_states.device
         

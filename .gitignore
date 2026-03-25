@@ -5,3 +5,5 @@ extracted_dataset/
 data/coconut_prosqa_gpt2/
 data/coconut_prosqa_gpt2_context/
 translator_models/
+extracted_dataset_test/
+coconut_prosqa_gpt2_context_test/
