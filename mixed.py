@@ -83,22 +83,36 @@ class CoconutWithTranslator(nn.Module):
 
             current_pass_latents = []
             active_indices = []
-            
+            filling_indices = []
+
             for b_idx, mask_list in enumerate(latent_lists):
                 if len(mask_list) > pass_idx:
                     token_idx = mask_list[pass_idx]
                     # 获取产生 latent 的上一个位置的 hidden state
                     latent_vec = hidden_states[b_idx : b_idx+1, token_idx - 1 - hidden_states_offset : token_idx - hidden_states_offset, :]
-                    
+
                     # 记录到历史累积列表中 (不 detach，保留梯度传回主模型)
                     accumulated_latents[b_idx].append(latent_vec)
-                    
-                    # 收集当前轮的独立 latent 向量（仅供打日志用）
+
+                    # 收集当前轮的独立 latent 向量
                     current_pass_latents.append(latent_vec)
                     active_indices.append(b_idx)
-                    
-                    # 注入当前 embed 以供下一轮思考
-                    inputs_embeds[b_idx, token_idx, :] = latent_vec.squeeze(0).squeeze(0)
+                    filling_indices.append((b_idx, token_idx))
+
+            # Bug1修复：用 tensor_list 方式重建 inputs_embeds，避免原地操作破坏计算图
+            # 原先直接 inputs_embeds[b_idx, token_idx, :] = ... 是对计算图中张量的原地写入，
+            # 会导致 autograd 梯度错误。参照 coconut.py 的 tensor_list + torch.stack 方案。
+            if filling_indices:
+                tensor_list = [
+                    [inputs_embeds[batch_idx, pos, :] for pos in range(inputs_embeds.shape[1])]
+                    for batch_idx in range(inputs_embeds.shape[0])
+                ]
+                for (b_idx, token_idx), latent_vec in zip(filling_indices, current_pass_latents):
+                    tensor_list[b_idx][token_idx] = latent_vec.squeeze(0).squeeze(0)
+                inputs_embeds = torch.stack([
+                    torch.stack(tensor_list[batch_idx])
+                    for batch_idx in range(inputs_embeds.shape[0])
+                ])
 
             # --- 计算该轮的翻译 Loss ---
             if current_pass_latents:

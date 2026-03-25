@@ -121,9 +121,13 @@ def train():
         lambda_translator=cfg.get("lambda_translator", 0.5)
     ).to(device)
     
+    # Bug3修复：checkpoint 只加载一次，同时用于恢复模型权重和优化器状态。
+    # 原先加载了两次同一个文件（第一次 map_location="cpu"，第二次 map_location=device），
+    # 造成冗余 I/O，且两次加载语义不一致。
+    resume_ckpt = None
     if cfg.get("resume_from_checkpoint"):
         print(f"Resuming training from checkpoint: {cfg['resume_from_checkpoint']}")
-        resume_ckpt = torch.load(cfg["resume_from_checkpoint"], map_location="cpu")
+        resume_ckpt = torch.load(cfg["resume_from_checkpoint"], map_location=device)
         model.load_state_dict(resume_ckpt["model_state_dict"])
         print(f"Resumed model weights from checkpoint.")
 
@@ -134,12 +138,10 @@ def train():
 
     # 9. 优化器
     optimizer = AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
-    
-    if cfg.get("resume_from_checkpoint"):
-        checkpoint = torch.load(cfg["resume_from_checkpoint"], map_location=device)
-        if "optimizer_state_dict" in checkpoint:
-            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            print(f"Resumed optimizer state from checkpoint.")
+
+    if resume_ckpt is not None and "optimizer_state_dict" in resume_ckpt:
+        optimizer.load_state_dict(resume_ckpt["optimizer_state_dict"])
+        print(f"Resumed optimizer state from checkpoint.")
 
     # 10. 初始化 WandB
     wandb.init(project=cfg["project"], name=cfg["name"], config=cfg)
@@ -189,6 +191,10 @@ def train():
                 loss.backward()
 
                 if (global_step + 1) % cfg["gradient_accumulation_steps"] == 0:
+                    # Bug4修复：在 optimizer.step() 前做梯度裁剪。
+                    # 翻译器 loss 通过 latent 向量反向传播进 Coconut 主干，
+                    # 双向梯度耦合在早期 stage 极易引发梯度爆炸。
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
                     optimizer.zero_grad()
                 
@@ -207,7 +213,7 @@ def train():
 
             # --- 每个 Epoch 跑一次验证 ---
             print(f"\nRunning Evaluation for Stage {stage}, Epoch {epoch}...")
-            evaluate_and_log_wandb(model, raw_val, tokenizer, stage, epoch, device, cfg, latent_id)
+            evaluate_and_log_wandb(model, raw_val, tokenizer, stage, epoch, device, cfg, latent_id, start_id, end_id)
             
             # 保存混合模型的 Checkpoint
             save_checkpoint(model, optimizer, stage, epoch, cfg["save_path"], cfg["name"])
@@ -215,7 +221,7 @@ def train():
     wandb.finish()
 
 @torch.no_grad()
-def evaluate_and_log_wandb(model, raw_val, tokenizer, stage, epoch, device, cfg, latent_id):
+def evaluate_and_log_wandb(model, raw_val, tokenizer, stage, epoch, device, cfg, latent_id, start_id, end_id):
     model.eval()
     
     # 选定评估集大小 (比如评估 300 条来算准确率)
@@ -257,13 +263,16 @@ def evaluate_and_log_wandb(model, raw_val, tokenizer, stage, epoch, device, cfg,
     # ==========================================
     # 2. 计算 Generation Accuracy (只使用问题 Prompt)
     # ==========================================
+    # Bug2修复：原先使用了 tokenizer.bos_token_id 和 tokenizer.eos_token_id，
+    # 导致 eval 序列的边界 token 与训练时不一致，准确率数字完全不可信。
+    # 现在通过函数参数传入正确的 <|start-latent|> 和 <|end-latent|> ID。
     eval_gen_ds = get_question_latent_dataset(
-        scheduled_stage=stage, 
-        base_dataset=eval_raw, 
-        configs=type('obj', (object,), cfg), 
-        start_id=tokenizer.bos_token_id, 
-        latent_id=latent_id, 
-        end_id=tokenizer.eos_token_id
+        scheduled_stage=stage,
+        base_dataset=eval_raw,
+        configs=type('obj', (object,), cfg),
+        start_id=start_id,
+        latent_id=latent_id,
+        end_id=end_id
     )
     
     table = wandb.Table(columns=[
