@@ -1,6 +1,6 @@
 project: coconut-translator
-save_path: ./models/prosqa-coconut-hybrid_v2
-name: prosqa-coconut-hybrid-v2-resume_from_stage3_epoch4
+save_path: ./models/prosqa-coconut-hybrid_v3
+name: prosqa-coconut-hybrid-v3
 
 # 训练阶段控制
 epochs_per_stage: 5
@@ -31,8 +31,8 @@ load_model_path: /home/haoyang/haoyang/coconut/models/nihaoyang2002-kth-royal-in
 load_translator_path: null
 
 # 恢复训练相关参数
-resume_from_checkpoint: "/home/haoyang/haoyang/coconut/models/prosqa-coconut-hybrid_v2/prosqa-coconut-hybrid-v2_stage3_epoch4.pt" # 填入你想要恢复的 .pt 文件路径。如果不恢复，设为 null。
-resume_stage: 4 # 从哪个 stage 开始恢复
+resume_from_checkpoint: null # 填入你想要恢复的 .pt 文件路径。如果不恢复，设为 null。
+resume_stage: 1 # 从哪个 stage 开始恢复
 resume_epoch: 0  # 从哪个 epoch 开始恢复 (通常是你刚刚完成的 epoch + 1。比如跑完了 epoch 4，这里填 5)
 
 # 如果你只想单独给最后一个 stage 加训，覆盖默认的 epochs_per_stage：
