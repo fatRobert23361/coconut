@@ -251,14 +251,15 @@ def evaluate_and_log_wandb(model, raw_val, tokenizer, stage, epoch, device, cfg,
     # ==========================================
     # 1. 计算 Validation Loss (使用完整序列)
     # ==========================================
+    # eval 的 val loss 必须禁用 uniform_prob，否则每次采样不同 stage 导致 loss 不可重复
     eval_loss_ds = get_cot_latent_dataset(
-        scheduled_stage=stage, 
-        base_dataset=eval_raw, 
-        configs=type('obj', (object,), cfg), 
-        start_id=tokenizer.convert_tokens_to_ids("<|start-latent|>"),
-        latent_id=latent_id, 
-        end_id=tokenizer.convert_tokens_to_ids("<|end-latent|>"),
-        shuffle=False, 
+        scheduled_stage=stage,
+        base_dataset=eval_raw,
+        configs=type('obj', (object,), {**cfg, 'uniform_prob': 0.0}),
+        start_id=start_id,
+        latent_id=latent_id,
+        end_id=end_id,
+        shuffle=False,
         eos_id=tokenizer.eos_token_id
     )
     

@@ -162,15 +162,10 @@ def get_cot_latent_dataset(
             for _ in range(configs.c_thought - 1):
                 translator_step_tokens.append([])
 
-            if step_idx < len(sample["steps_tokenized"]):
-                # 有对应的真实推理步骤：加 eos_id 作为结束符，作为翻译器的监督目标
-                step_text = sample["steps_tokenized"][step_idx]
-                translator_step_tokens.append(step_text + [eos_id])
-            else:
-                # 额外的 latent（题目步骤数 < n_latent_stages）：
-                # 不附加任何 token，Collator 会填充 pad，forward 中会被 mask 为 -100，
-                # 不产生监督信号。避免依赖 pad_id == eos_id 的侥幸巧合。
-                translator_step_tokens.append([])
+            # n_latent_stages <= len(steps_tokenized) 已由三重 min 保证，
+            # 此处 step_idx 必然 < len(steps_tokenized)，直接取目标文本。
+            step_text = sample["steps_tokenized"][step_idx]
+            translator_step_tokens.append(step_text + [eos_id])
         # -----------------------------------------------------
 
         tokens = (
