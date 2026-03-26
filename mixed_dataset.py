@@ -83,11 +83,19 @@ class MyCollator:
                 dtype=torch.long
             )
             
+            # 基于真实序列长度构建 mask（1=有效 token 含 EOS，0=padding）
+            # 不依赖 token 值判断，避免 pad_id == eos_id 时 EOS 被错误 mask 的问题
+            translator_labels_mask = torch.zeros(
+                (len(features), max_latents_in_batch, max_step_len),
+                dtype=torch.long
+            )
+
             for b_idx, b_data in enumerate(temp_batch_translator):
                 for l_idx, s_data in enumerate(b_data):
                     if len(s_data) > 0:
                         final_t_labels[b_idx, l_idx, :len(s_data)] = torch.tensor(s_data)
-            
+                        translator_labels_mask[b_idx, l_idx, :len(s_data)] = 1
+
             batch_translator_labels = final_t_labels
 
         # 4. 常规 Padding (input_ids, labels, attention_mask)
@@ -109,6 +117,7 @@ class MyCollator:
 
         if batch_translator_labels is not None:
             batch["translator_labels"] = batch_translator_labels
+            batch["translator_labels_mask"] = translator_labels_mask
 
         return batch
 

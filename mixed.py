@@ -31,7 +31,7 @@ class CoconutWithTranslator(nn.Module):
         else:
             self.embedding = self.base_causallm.get_input_embeddings()
 
-    def forward(self, input_ids, attention_mask, labels, position_ids, translator_labels=None, **kwargs):
+    def forward(self, input_ids, attention_mask, labels, position_ids, translator_labels=None, translator_labels_mask=None, **kwargs):
         logits = []
         last_hidden_states = []
         
@@ -135,12 +135,21 @@ class CoconutWithTranslator(nn.Module):
                     context_ids_active = context_ids_batch[active_indices]
 
                     # 构造 Translator 所需的输入
-                    pad_id = self.translator.pad_id 
-                    t_input_ids = target_ids_active.clone()  
-                    t_labels = target_ids_active.clone()  
-                    t_labels[t_labels == pad_id] = -100   
+                    t_input_ids = target_ids_active.clone()
 
-                    t_attention_mask = (t_input_ids != pad_id).long()
+                    # 用基于序列长度的 mask 来构建 t_labels 和 t_attention_mask，
+                    # 避免 pad_id == eos_id 时 EOS 被错误 mask 掉导致翻译器学不到停止信号。
+                    if translator_labels_mask is not None:
+                        t_mask_active = translator_labels_mask[active_indices, pass_idx, :]
+                        t_labels = t_input_ids.clone()
+                        t_labels[t_mask_active == 0] = -100
+                        t_attention_mask = t_mask_active.long()
+                    else:
+                        # 兼容旧数据：fallback 到原来靠 token 值判断的方式
+                        pad_id = self.translator.pad_id
+                        t_labels = t_input_ids.clone()
+                        t_labels[t_labels == pad_id] = -100
+                        t_attention_mask = (t_input_ids != pad_id).long()
 
                     if (t_labels != -100).any():
                         # 对 latent 向量做 detach，阻止翻译器的梯度反传进 Coconut 主干。
