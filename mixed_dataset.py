@@ -142,13 +142,10 @@ def get_cot_latent_dataset(
         else:
             scheduled_stage_to_train = scheduled_stage
 
-        # 限制最大 latent 阶段
-        if scheduled_stage_to_train > configs.max_latent_stage:
-            n_skip_steps = len(sample["steps_tokenized"]) # 如果超出，可能全部转 latent (视逻辑而定)
-            n_latent_stages = min(len(sample["steps_tokenized"]), configs.max_latent_stage)
-        else:
-            n_skip_steps = scheduled_stage_to_train
-            n_latent_stages = scheduled_stage_to_train
+        # latent 数量同时被 max_latent_stage 和实际步骤数双重截断，
+        # 确保每个 latent 都精确对应一个真实推理步骤，避免产生无监督的多余 latent。
+        n_latent_stages = min(scheduled_stage_to_train, len(sample["steps_tokenized"]), configs.max_latent_stage)
+        n_skip_steps = n_latent_stages
 
         if configs.no_cot:
             n_skip_steps = 100
