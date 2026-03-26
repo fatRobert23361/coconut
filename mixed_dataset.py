@@ -152,15 +152,19 @@ def get_cot_latent_dataset(
         # 我们按步骤存储。如果 c_thought > 1，我们会把步骤文本分配给对应的 latent 块
         translator_step_tokens = []
         for step_idx in range(n_latent_stages):
-            if step_idx < len(sample["steps_tokenized"]):
-                step_text = sample["steps_tokenized"][step_idx]
-            else:
-                step_text = []  # 如果这道题没那么多步骤，对应的潜变量就翻译为空
-            # 如果 c_thought 为 2，那么每两个 latent token 对应一个 step
-            # 我们把 label 放在这组 latent 的最后一个上，前面的设为空
+            # 如果 c_thought > 1，每组 latent 的前 c_thought-1 个都是空（无监督）
             for _ in range(configs.c_thought - 1):
-                translator_step_tokens.append([]) 
-            translator_step_tokens.append(step_text + [eos_id]) # 加上结束符
+                translator_step_tokens.append([])
+
+            if step_idx < len(sample["steps_tokenized"]):
+                # 有对应的真实推理步骤：加 eos_id 作为结束符，作为翻译器的监督目标
+                step_text = sample["steps_tokenized"][step_idx]
+                translator_step_tokens.append(step_text + [eos_id])
+            else:
+                # 额外的 latent（题目步骤数 < n_latent_stages）：
+                # 不附加任何 token，Collator 会填充 pad，forward 中会被 mask 为 -100，
+                # 不产生监督信号。避免依赖 pad_id == eos_id 的侥幸巧合。
+                translator_step_tokens.append([])
         # -----------------------------------------------------
 
         tokens = (
