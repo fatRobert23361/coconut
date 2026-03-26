@@ -215,11 +215,11 @@ def get_question_latent_dataset(
     n_additional_tokens = 0 if no_special_marker else 2
 
     def process_dataset(sample):
-        # 这里的阶段计算与训练集保持一致
-        if random.random() < getattr(configs, "uniform_prob", 0.0):
-            scheduled_stage_to_train = random.choice(list(range(len(sample["steps_tokenized"]) + 1)))
-        else:
-            scheduled_stage_to_train = scheduled_stage
+        # eval 数据集必须使用固定的 scheduled_stage，不能随机采样。
+        # uniform_prob 仅用于训练集增加多样性；如果 eval 也随机化，
+        # GT thoughts 数量（始终按 stage 截取）与 decoded thoughts 数量会不一致，
+        # 导致 thought_accuracy 完全不可信。
+        scheduled_stage_to_train = scheduled_stage
 
         if scheduled_stage_to_train > configs.max_latent_stage:
             n_latent_stages = min(len(sample["steps_tokenized"]), configs.max_latent_stage)
