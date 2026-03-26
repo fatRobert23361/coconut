@@ -1,6 +1,6 @@
 project: coconut-translator
-save_path: ./models/prosqa-coconut-hybrid_v3
-name: prosqa-coconut-hybrid-v3
+save_path: ./models/prosqa-coconut-hybrid_v4
+name: prosqa-coconut-hybrid-v4
 
 # 训练阶段控制
 epochs_per_stage: 5
