@@ -7,12 +7,13 @@ epochs_per_stage: 5
 max_latent_stage: 6
 c_thought: 1
 pad_latent_to_max: True
-uniform_prob: 0.0
+uniform_prob: 0.1  # 10% 概率随机采样低 stage，增加训练多样性缓解过拟合
 no_cot: False
 
 # 翻译器相关 (混合 Loss 参数)
-lambda_translator: 0.5    # 翻译器 Loss 的权重
+lambda_translator: 0.5    # 翻译器 Loss 的最大权重（实际值 = 0.5 * stage/max_stage，动态递增）
 translator_lr: !!float "5e-5"
+warmup_steps_per_stage: 100  # 每个 stage 开始时的 LR warmup 步数
 
 # 基础训练参数
 model_id: openai-community/gpt2

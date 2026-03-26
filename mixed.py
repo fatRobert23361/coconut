@@ -143,8 +143,11 @@ class CoconutWithTranslator(nn.Module):
                     t_attention_mask = (t_input_ids != pad_id).long()
 
                     if (t_labels != -100).any():
+                        # 对 latent 向量做 detach，阻止翻译器的梯度反传进 Coconut 主干。
+                        # Coconut 的参数只由 coconut_loss 更新，翻译器独立收敛，
+                        # 避免早期翻译器随机梯度噪声破坏主干的推理能力。
                         t_loss, _ = self.translator(
-                            latent_states=batch_history_latents,
+                            latent_states=batch_history_latents.detach(),
                             context_ids=context_ids_active,
                             input_ids=t_input_ids,
                             labels=t_labels,

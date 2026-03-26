@@ -5,6 +5,7 @@ import wandb
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 from transformers import AutoTokenizer, GPT2LMHeadModel
 
 from mixed import CoconutWithTranslator
@@ -152,14 +153,33 @@ def train():
     start_epoch = cfg.get("resume_epoch", 0)
     
     # 11. 主训练循环：分阶段 (Curriculum Learning)
+    warmup_steps = cfg.get("warmup_steps_per_stage", 100)
+
     for stage in range(start_stage, cfg["max_latent_stage"] + 1):
         print(f"\n>>> Starting Stage {stage} (Adding {stage} latent thought steps)")
-        
+
+        # 问题2b修复：动态 lambda_translator，随 stage 线性递增。
+        # 早期 stage latent 质量差，翻译器信号噪声大，给低权重；
+        # 后期 stage latent 表示成熟，再逐步加大翻译器监督比例。
+        current_lambda = cfg.get("lambda_translator", 0.5) * (stage / cfg["max_latent_stage"])
+        model.lambda_translator = current_lambda
+        print(f"lambda_translator = {current_lambda:.3f}")
+
+        # 问题3修复：每个 stage 开始时重置 LR 并启动 warmup 调度器。
+        # stage 切换时模型分布突变，直接用全量 LR 冲击会导致 loss 振荡，
+        # warmup 让参数在新分布下平稳过渡。
+        for pg in optimizer.param_groups:
+            pg['lr'] = cfg['lr']
+        scheduler = LambdaLR(
+            optimizer,
+            lr_lambda=lambda step: min(1.0, (step + 1) / max(1, warmup_steps))
+        )
+
         if stage == cfg["max_latent_stage"] and cfg.get("epochs_for_final_stage"):
             target_epochs = cfg["epochs_for_final_stage"]
         else:
             target_epochs = cfg["epochs_per_stage"]
-        
+
         train_ds = get_cot_latent_dataset(
             scheduled_stage=stage, 
             base_dataset=raw_train, 
@@ -191,13 +211,11 @@ def train():
                 loss.backward()
 
                 if (global_step + 1) % cfg["gradient_accumulation_steps"] == 0:
-                    # Bug4修复：在 optimizer.step() 前做梯度裁剪。
-                    # 翻译器 loss 通过 latent 向量反向传播进 Coconut 主干，
-                    # 双向梯度耦合在早期 stage 极易引发梯度爆炸。
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
+                    scheduler.step()  # 问题3修复：warmup 调度
                     optimizer.zero_grad()
-                
+
                 if global_step % 10 == 0:
                     wandb.log({
                         "train/total_loss": outputs.loss.item(),
@@ -205,7 +223,9 @@ def train():
                         "train/translator_loss": outputs.translator_loss.item(),
                         "meta/stage": stage,
                         "meta/epoch": epoch,
-                        "meta/step": global_step
+                        "meta/step": global_step,
+                        "meta/lr": optimizer.param_groups[0]['lr'],
+                        "meta/lambda_translator": model.lambda_translator,
                     })
                 
                 pbar.set_postfix({"loss": f"{outputs.loss.item():.4f}"})
