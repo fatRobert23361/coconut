@@ -15,7 +15,8 @@ class CoconutWithTranslator(nn.Module):
         start_latent_id,
         end_latent_id,
         eos_token_id,
-        lambda_translator=0.5 # 翻译器 loss 的权重
+        lambda_translator=0.5, # 翻译器 loss 的权重
+        c_thought=1,
     ):
         super().__init__()
         self.base_causallm = base_causallm
@@ -25,6 +26,7 @@ class CoconutWithTranslator(nn.Module):
         self.start_latent_id = start_latent_id
         self.end_latent_id = end_latent_id
         self.lambda_translator = lambda_translator
+        self.c_thought = c_thought
 
         if hasattr(self.base_causallm, "transformer"):
             self.embedding = self.base_causallm.transformer.get_input_embeddings()
@@ -203,31 +205,35 @@ class CoconutWithTranslator(nn.Module):
         )
         
     @torch.no_grad()
-    def translate_latents(self, latent_states_list, context_ids, tokenizer):
+    def translate_latents(self, latent_states_list, context_ids, tokenizer, c_thought=1):
         """
-        工具函数：在 generate 时将每一步解译出的历史向量解译回思维文本
+        工具函数：在 generate 时将每一步解译出的历史向量解译回思维文本。
+        c_thought > 1 时，只在每组的最后一个 latent（即 (i+1) % c_thought == 0）
+        处调用翻译器，与训练时的监督信号对齐。
+        此时解码所用的 latent 序列长度依次为 c_thought, 2*c_thought, 3*c_thought, ...
         """
         decoded_thoughts = []
-        cumulative_latents = [] # 收集历史向量
-        
+        cumulative_latents = []
+
         for i, latent_vec in enumerate(latent_states_list):
-            if latent_vec is None: continue
-            
-            # latent_vec 是从 CPU detached 出来的，形状 (1, 1, hidden)
+            if latent_vec is None:
+                continue
+
             cumulative_latents.append(latent_vec.to(self.base_causallm.device))
-            
-            # 拼成 (1, 当前经历的 latent 数, hidden)
+
+            # 只在每组最后一个 latent 处解码
+            if (i + 1) % c_thought != 0:
+                continue
+
             current_history = torch.cat(cumulative_latents, dim=1)
-            
-            # 传入累积的历史向量，翻译出对应的文本
             thought_tokens = self.translator.translate(
                 latent_states=current_history,
-                context_ids=context_ids, 
+                context_ids=context_ids,
                 max_new_tokens=40
             )
             text = tokenizer.decode(thought_tokens[0], skip_special_tokens=True)
             decoded_thoughts.append(text.strip())
-            
+
         return decoded_thoughts
     
     @torch.no_grad()
@@ -257,7 +263,7 @@ class CoconutWithTranslator(nn.Module):
         
         if show_thoughts and outputs.latent_states:
             print("--- 正在解译隐藏思维 ---")
-            thought_text = self.translate_latents(outputs.latent_states, context_ids, tokenizer)
+            thought_text = self.translate_latents(outputs.latent_states, context_ids, tokenizer, c_thought=getattr(self, 'c_thought', 1))
             print(thought_text)
             print("--- 思维结束，开始生成回答 ---")
 

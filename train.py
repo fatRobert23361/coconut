@@ -119,7 +119,8 @@ def train():
         start_latent_id=start_id, 
         end_latent_id=end_id,
         eos_token_id=tokenizer.eos_token_id,
-        lambda_translator=cfg.get("lambda_translator", 0.5)
+        lambda_translator=cfg.get("lambda_translator", 0.5),
+        c_thought=cfg.get("c_thought", 1),
     ).to(device)
     
     # Bug3修复：checkpoint 只加载一次，同时用于恢复模型权重和优化器状态。
@@ -331,7 +332,7 @@ def evaluate_and_log_wandb(model, raw_val, tokenizer, stage, epoch, device, cfg,
         )
         
         # 解密隐藏思维
-        decoded_thoughts_list = model.translate_latents(outputs.latent_states, context_ids, tokenizer)
+        decoded_thoughts_list = model.translate_latents(outputs.latent_states, context_ids, tokenizer, c_thought=cfg.get("c_thought", 1))
         decoded_thoughts_text = {idx: text.strip() for idx, text in enumerate(decoded_thoughts_list)}
         
         # 正式生成回答 (调大 max_new_tokens 给模型留足空间)
